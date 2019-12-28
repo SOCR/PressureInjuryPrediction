@@ -32,7 +32,7 @@ Goals
 Team
 ====
 
-Christine Anderson, Zerihun Bekele, Dana Tschannen, [Ivo Dinov](http://umich.edu/~dinov), and the [SOCR Team](www.socr.umich.edu/people).
+Zerihun Bekele, Christine Anderson, Dana Tschannen, [Ivo Dinov](http://umich.edu/~dinov), and the [SOCR Team](www.socr.umich.edu/people).
 
 
 Code
