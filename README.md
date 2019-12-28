@@ -1,5 +1,7 @@
 # Pressure Injury Prediction Modeling (PIPM) Project
 
+<img align="right" height=250  src="https://github.com/SOCR/PressureInjuryPrediction/raw/master/util/PIPM_Leg01.png"></a>
+
 Table of contents
 =================
 
@@ -9,6 +11,7 @@ Table of contents
    * [Goals](#goals)
    * [Team](#team)
    * [Code](#code)
+   * [App](#application)
    * [Acknowledgments](#acknowledgments)
 <!--tc-->
 This SOCR project is focused on a clinical collaboration to study *pressure injury* in bed-confined hospitalized patients.
@@ -36,6 +39,11 @@ Code
 ====
 
 The complete code and end-to-end pipleine workflow for this project is available in the [code folder](https://github.com/SOCR/PressureInjuryPrediction/tree/master/code). 
+
+Application
+===========
+
+The [pressure injury prediction model (PIPM) live application is available for interactive testing](https://socr.shinyapps.io/RShinyApp_PIPM/) by researchers, clinicians, and healthcare providers.
 
 Acknowledgments
 ===============
