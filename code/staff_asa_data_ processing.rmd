@@ -1,0 +1,226 @@
+---
+title: "Process staffing and ASA data"
+author: "Zerihun Bekele"
+date: "10/18/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Processes staffing data
+
+
+```{r}
+library("openxlsx")
+
+census <- read.xlsx("Staffing_Snapshot_v1.xlsx", sheet = 1, cols = c(1,2,3,4))
+staffing <- read.xlsx("Staffing_Snapshot_v1.xlsx", sheet = 2)
+```
+
+
+```{r}
+head(staffing)
+head(census)
+```
+
+## Calculate productivity
+
+```{r}
+library(dplyr)
+
+staff.prod <- staffing %>% group_by(UNIT_NAME, CAL_DTM,STAFF_LEVEL) %>% summarise(productivity=sum(PRODUCTIVE_HOURS))
+```
+
+```{r}
+head(staff.prod)
+```
+
+```{r}
+library(tidyr)
+
+staff.prod <- spread(staff.prod, STAFF_LEVEL,productivity)
+```
+
+```{r}
+staff.prod <- staff.prod[,c(1,2,4,5,7)]
+head(staff.prod)
+```
+
+```{r}
+staff.prod <- replace_na(staff.prod, list(OTH=0, RN=0, TRN=0))
+head(staff.prod)
+```
+
+```{r}
+## Join the staff.prod and census data
+staff.census <- staff.prod %>% left_join(census, by=c("UNIT_NAME", "CAL_DTM" = "CENSUS_DATE"))
+head(staff.census)
+```
+```{r}
+staff.census <- staff.census %>% mutate(RN.HPPD = (RN + TRN)/CENSUS_NIGHT)
+staff.census <- staff.census %>% mutate(Total.HPPD = (OTH + RN + TRN)/CENSUS_NIGHT)
+head(staff.census)
+```
+#### Remove NA rows
+
+```{r}
+staff.census <- staff.census[!apply(staff.census[,6], 2, is.na),]
+dim(staff.census)
+```
+
+
+```{r}
+write.csv(x=staff.census, file ="staff_census.csv", row.names = F)
+```
+
+
+```{r}
+staff.census <- read.csv("staff_census.csv", stringsAsFactors = FALSE)
+
+staff.census$CAL_DTM <- as.Date(staff.census$CAL_DTM)
+```
+
+
+### Read location data
+
+```{r}
+location_data <- read.csv("loc_dates_wide.csv")
+location_data <- subset(location_data, select=-c(startdate.NA, enddate.NA))
+location_data2 <- location_data
+for (i in 2:59) {
+  location_data2[,i] <- as.Date(location_data[,i])
+  
+}
+
+```
+
+### Remove locations that don't exist in the staffing data
+
+```{r}
+name_map <- read.csv("name_map.csv", stringsAsFactors = FALSE)
+
+loc_names <- (gsub("^(startdate|enddate)\\.","", names(location_data2)))
+loc_names <- gsub("\\.", " ", loc_names)
+names(location_data2) <- loc_names
+
+#names(location_data2) %in% name_map$old_name 
+
+write.csv(loc_names, "loc_names.csv",row.names = FALSE, col.names = FALSE)
+loc_names <- read.csv("loc_names.csv", header = FALSE, stringsAsFactors = FALSE)
+loc_names <- loc_names$V1
+
+loc_vec <- name_map$new_name
+names(loc_vec) <- name_map$Old_name
+
+
+selected_location_data <- location_data2[,which(loc_names %in% name_map$Old_name)]
+
+
+names(selected_location_data) <- loc_vec[gsub("\\.1$","", names(selected_location_data))]
+
+```
+
+## Calculate Average Total HPPD for each individual for all locations duration they have stayed
+
+```{r}
+
+for (loc.i in seq(1,36,2)) {
+  avg.total.hppd = paste("Avg.Total.HPPD",loc.i,sep="_")
+  avg.rn.hppd = paste("Avg.RN.HPPD",loc.i,sep="_")
+  selected_location_data[avg.total.hppd] <- NA
+  selected_location_data[avg.rn.hppd] <- NA
+  
+  one_location <- selected_location_data[,loc.i:(loc.i+1)]
+  one_location <- one_location[!apply(one_location, 1, function(x) any(is.na(x))),]
+
+  for (i in 1:nrow(one_location)) {
+    ind = one_location[i, ]
+    print(ind)
+  # date_range <- seq(ind[1,1], ind[1,2], by="day")
+  #   loc <- names(ind)
+  #   row_fltr <- (staff.census$UNIT_NAME == loc[1]) & (staff.census$CAL_DTM %in% date_range)
+  #   selected_location_data[i,avg.total.hppd] <- mean(staff.census[row_fltr, "Total.HPPD"])
+  #   selected_location_data[i,avg.rn.hppd] <- mean(staff.census[row_fltr, "RN.HPPD"])
+  #   
+    }
+}
+
+write.csv(selected_location_data, "location_plus_staff.csv", row.names = FALSE)
+```
+
+```{r}
+surgical_data <- read.csv("surgical_data_agg.csv", stringsAsFactors = FALSE)
+surg_proc <- surgical_data %>% select(starts_with("surgicalservice"))
+surgical_data$surgicalscheduledprocedure_1[1:5]
+head(surgical_data$surgical_serivice)
+```
+
+```{r}
+braden <- read.csv("braden_agg_perc.csv")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+library("memisc")
+system.time({
+  data <- as.data.set(spss.system.file("../July_2019_Data_Docs/PIPM_6-24-19.sav"))
+  pi.data <- as.data.frame(data)
+  })
+
+dim(pi.data)
+
+loc_data <- dplyr::select(pi.data, starts_with('location'))
+
+dim(loc_data)
+
+#loc_names <- loc_data %>% select(-dplyr::ends_with("date"))
+
+loc_names <- loc_data[,-grep("date", names(loc_data))]
+loc_names
+all_names
+all_names <- unique(as.vector(as.matrix(loc_names)))
+
+unit_names <- unique(staff.census$UNIT_NAME)
+all_names
+```
+
+```{r}
+unit_names
+
+lapply(unit_names, grep, all_names)
+
+loc_data[1:10,1:5]
+```
+
+```{r}
+staff.census[staff.census[1:10,c("UNIT_NAME", "CAL_DTM")] == c("4B","41760"), "RN.HPPD"]
+
+(as.Date(41760, origin = "1900-01-01")-2)
+paste0(staff.census$UNIT_NAME[1:10], staff.census$CAL_DTM[1:10])
+```
+

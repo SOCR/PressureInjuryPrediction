@@ -1,0 +1,628 @@
+---
+title: "Imputed data analysis"
+author: "Zerihun Bekele"
+date: "9/3/2019"
+output: html_document
+---
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("G:/My Drive/PIPM_Data_R_code")
+```
+
+## Imputed data
+
+| Data type | Imputed? | Method |
+|----:|:----:|:----:|
+| Static numeric | Yes | Mice |
+| Braden activity | Yes | Mice |
+| Time series binary | No | No missing values |
+| time series numeric | Yes | Mice |
+| Location | Yes | Mice |
+| Periop numeric | Yes | Mice |
+| Periop binary | NO | No missing values |
+| Surgical data | No | No missing values |
+| ASA data | Yes | KNN |
+
+
+## Import imputed data
+
+### Import and analyze static numeric data
+
+```{r}
+# Function to read and combine imputed data
+combine_data <- function(fname){
+  imp_dt <- readRDS(paste0("Mice-impute-output/", fname))
+  imp1 <- complete(imp_dt, 1)
+  imp2 <- complete(imp_dt, 2)
+  imp3 <- complete(imp_dt, 3)
+
+  cat_vars <- names(imp1)[unlist(lapply(imp1, is.factor))]
+  num_vars <- setdiff(names(imp1), cat_vars)
+
+  # Take the mean of the imputed tables for the numeric variables
+  num_dt <- (imp1[,num_vars] + imp2[,num_vars] + imp3[, num_vars])/3
+
+  # For the categorical data we can either pick at random or the most frequent one
+  # Here I will just pick one at random
+  # The the complete dataframe becomes the combination of the numerical and categorical
+  return(cbind(num_dt, imp1[, cat_vars]))
+}
+
+num_vars <- function(df) names(df)[unlist(lapply(df, is.numeric))]
+
+```
+
+```{r message=FALSE}
+library(mice)
+
+static_combined <- combine_data("static_agg_datamice.rds")
+
+```
+## Check the plausibility of the data
+
+```{r}
+summary(static_combined)
+```
+
+The `Pi` column have to be replaced with the original data.
+
+```{r}
+static_agg <- read.csv("static_agg_data.csv", header = T, row.names = 1)
+static_combined$pi <- static_agg$pi
+
+# Replace NAs with 0
+static_combined$pi[is.na(static_combined$pi)] <- 0
+static_agg$pi <- static_combined$pi
+table(static_combined$pi)
+```
+
+```{r fig.width=11, fig.height=11}
+static_numeric <- static_combined[, num_vars(static_combined)]
+static_agg_num <- static_agg[,num_vars(static_agg)]
+
+col1 <- yarrr::transparent("springgreen", trans.val = 0.2)
+col2 <- yarrr::transparent("red", trans.val = .6)
+  
+distplot <- function(dt1, dt2){
+  n.row <- ceiling(length(dt1)/5)
+  par(mfrow=c(n.row,5), cex=0.7, cex.main=1.2,
+      mai=c(5,2,2,2), 
+      mar=c(2,2,2,.5))
+  
+  for (i in seq(length(dt1)) ) {
+    h1 <- hist(dt1[,i], breaks = 20, plot = F)
+    h2 <- hist(dt2[,i], breaks = 20, plot = F)
+    
+    hist(dt1[,i], main = names(dt1)[i], freq=F, breaks = 20, ylim = c(0, 1.2*max(c(h1$density,h2$density))),
+         col=col1, xlab = "", ylab = "")
+    hist(dt2[,i], breaks = 20, freq=F, col=col2, xlab = "", ylab = "", add=T)
+    box()
+    
+    #print(2*max(h1$counts,h2$counts, na.rm = T))
+    
+  }
+}
+
+#distplot(static_numeric)
+distplot(static_agg_num, static_numeric)
+```
+
+```{r fig.width=11, fig.height=11}
+static_cat <- static_combined[, !(names(static_combined) %in% num_vars(static_combined))]
+static_agg_cat <- static_agg[,!(names(static_agg) %in% num_vars(static_agg))]
+
+bar_plot <- function(dt1, dt2){
+  
+  n.row <- ceiling(length(dt1)/8)
+  par(mfrow=c(n.row,6), cex=0.7, cex.main=1.2,
+      mai=c(5,2,2,2), 
+      mar=c(2,2,2,.5))
+  for (i in seq(ncol(dt1))) {
+    x.prop1 <- prop.table(table(dt1[,i]))
+    x.prop2 <- prop.table(table(dt2[,i]))
+    
+    barplot(x.prop1, xpd=FALSE, main = names(dt1)[i], 
+              col = col1, 
+              ylim = c(0,max(x.prop1,x.prop2)*1.1))
+    barplot(x.prop2, xpd=F, col=col2, add = T)
+    box()
+  }
+  
+}
+
+bar_plot(static_agg_cat, static_cat)
+```
+
+
+## Kmeans clustering
+
+Let us apply kmeans for the two groups
+```{r}
+library(caret)
+
+# Convert to dummy variables (one-hot-encoding)
+dmy <- dummyVars(" ~ .", data = static_combined, fullRank=T)
+static_dmy <- data.frame(predict(dmy, newdata = static_combined))
+#names(static_dmy)
+
+# Scale the data
+static_scaled <- as.data.frame(scale(static_dmy), col.names = colnames(static_dmy))
+
+# min max scaling
+
+min_max <- function(dt) {
+  min_ <- apply(dt, 2, min, na.rm=T)
+  max_ <- apply(dt, 2, max, na.rm=T)
+  dt_min_max <- t(apply(apply(dt, 1, function(x) x-min_), 2, function(x) x/(max_ - min_)))
+  return(dt_min_max)
+}
+
+static_min_max <- min_max(static_dmy)
+#summary(static_min_max)
+```
+
+```{r fig.width=10, fig.height=8}
+library(corrplot)
+
+stat_corr <- cor(static_min_max)
+
+for (i in 1:ncol(stat_corr)) {
+  stat_corr[i,i] <- 0
+}
+high_corr <- apply(stat_corr, 1, function (x) any(x>0.9))
+
+par(oma=c(0.2,0.1,1,0.2))
+corrplot(stat_corr[high_corr, high_corr], method="color", 
+         type = 'lower', addCoef.col = "black")
+mtext("Variables with correlation > 0.9 with at least one variable", 
+      outer = TRUE, cex = 1.5)
+```
+
+## Kmeans clustering 
+
+```{r message=FALSE, fig.width=10, fig.height=8}
+library(dplyr)
+
+km_dt <- min_max(select(static_dmy, -c(pi, pi_dayfromadmit) ))
+k2 <- kmeans(km_dt, centers = 2, nstart = 10)
+
+# plot the 2 clusters identified by kmeans
+library(factoextra)
+p1 <- fviz_cluster(k2, geom = "point", data = static_min_max) + ggtitle("k = 2")
+p1
+```
+
+### Color based on actual pi values
+
+```{r fig.width=10, fig.height=8}
+proj <- data.frame(p1$data)
+proj['pi'] <- static_combined$pi
+
+ggplot() + geom_jitter(aes(x=x, y = y, col=factor(pi)), data= proj) +
+  xlim(-15,0) + ylim(-10,10)
+```
+
+### PCA
+
+```{r}
+res.pca <- prcomp(km_dt)
+fviz_eig(res.pca)
+
+res.ind <- get_pca_ind(res.pca)
+pca.cord <- data.frame(res.ind$coord)
+
+```
+
+
+```{r message=FALSE}
+library(plotly)
+
+k3 <- kmeans(km_dt, centers = 3, nstart = 10)
+
+p <- plot_ly(pca.cord, x = ~Dim.1, y = ~Dim.2, z = ~Dim.3, color = as.factor(k3$cluster), colors = c('#8e24aa','#BF382A', '#0C4B8E')) %>%
+  add_markers() %>%
+  layout(scene = list(xaxis = list(title = 'Dim1'),
+                     yaxis = list(title = 'Dim 2'),
+                     zaxis = list(title = 'Dim 3')))
+p
+
+```
+
+```{r}
+pc_var <- res.pca$sdev^2
+pct_var <- 100*pc_var/sum(pc_var)
+
+plot(pct_var, xlab = "Principal Component", ylab = "Proportion of variance explained", type = "o", col="dark red")
+```
+
+```{r}
+pca.cum <- function(pc, cm=98) {
+    pc_var <- pc$sdev^2
+    pct_var <- 100*pc_var/sum(pc_var)
+    cum <- rev(which(cumsum(pct_var)<cm))[1]
+    plot(cumsum(pct_var), xlab = "Principal Component", 
+         ylab = "Cummulative proportion of variance explained", type = "o", col="dark red")
+    lines(c(0,length(pc_var)),c(cm,cm))
+    lines(c(cum,cum), c(0,100))
+}
+pca.cum(res.pca)
+```
+
+### Best K value for kmeans
+
+```{r}
+set.seed(123)
+
+# function to compute total within-cluster sum of square 
+wss <- function(k) {
+  kmeans(km_dt, k, nstart = 10 )$tot.withinss
+}
+
+# Compute and plot wss for k = 1 to k = 15
+k.values <- seq(2, 20,2)
+
+# extract wss for 2-15 clusters
+wss_values <- purrr::map_dbl(k.values, wss)
+
+plot(k.values, wss_values,
+       type="b", pch = 19, frame = FALSE, 
+       xlab="Number of clusters K",
+       ylab="Total within-clusters sum of squares")
+```
+### Silhoutte method to determine k
+
+```{r}
+fviz_nbclust(km_dt, kmeans, method = "silhouette")
+```
+
+### t-SNE
+
+```{r}
+library(Rtsne)
+set.seed(3434)
+tsne_pi <- Rtsne(km_dt, dims = 2, perplexity=80, verbose=TRUE, max_iter = 500)
+```
+```{r}
+pi.clr <- ifelse(static_combined$pi == 0, "#4caf50","#e64a19") 
+
+plot(tsne_pi$Y,  col = pi.clr, )
+```
+
+## Combine all dataset
+
+```{r}
+ts_numeric <- combine_data("ts_numeric_aggmice.rds")
+periop_numeric <- combine_data("periop_numeric_aggmice.rds")
+braden_perc <- combine_data("braden_agg_percmice.rds")
+periop_binary <- read.csv("periop_yn_agg.csv")
+ts_binary <- read.csv("ts_binary_agg.csv")
+
+surgical_data2 <- read.csv("surgical_data_processed.csv")
+
+all_piData <- cbind(static_combined, ts_numeric, ts_binary, periop_numeric, 
+                    periop_binary, braden_perc)
+
+
+
+all_piData <- cbind(pi.data[,1:2], all_piData)
+
+all_piData <- merge(all_piData,surgical_data2[,2:9], by=c("encounterid"))
+
+```
+
+Impute ASA data
+
+```{r}
+library(caret)
+preProcValues <- preProcess(asa_agg_data[,5:7],
+                            method = c("knnImpute"),
+                            k = 3,
+                            knnSummary = mean)
+impute_info <- predict(preProcValues, asa_agg_data, na.action = na.pass)
+
+
+procNames <- data.frame(col = names(preProcValues$mean), mean = preProcValues$mean, sd = preProcValues$std)
+for(i in procNames$col){
+ impute_info[i] <- impute_info[i]*preProcValues$std[i]+preProcValues$mean[i] 
+}
+
+all_piData <- merge(all_piData,impute_info[,2:7], by=c("encounterid"))
+all_piData <- all_piData %>% dplyr::select(-c("patientid.x","patientid.y"))
+
+# Replace NAs with 0
+#all_piData$pi[is.na(all_piData$pi)] <- 0
+table(all_piData$pi)
+
+write.csv(all_piData, "all_piData.csv")
+
+dim(all_piData)
+
+## Check data
+
+table(all_piData[all_piData$fltr,'pi'])
+
+
+all_piData <- read.csv("all_piData.csv")
+
+names(all_piData)[200:237]
+```
+
+#### Ckeck missing values
+
+```{r}
+
+which(apply(all_piData, 2, function(x) any(is.na(x))))
+
+na_features <- apply(all_piData,2, function(x) sum(is.na(x)))
+na_features[which(na_features>0)]
+
+
+```
+### Correlation using all dataset
+
+
+```{r fig.width=10, fig.height=8}
+num_features <- lapply(all_piData, is.numeric)
+
+pi_corr <- cor(all_piData[, names(which(unlist(num_features )))])
+
+for (i in 1:ncol(pi_corr)) {
+  pi_corr[i,i] <- 0
+}
+high_corr <- apply(pi_corr, 1, function (x) any(abs(x)>0.95))
+sum(high_corr)
+pi_hi_corr <- pi_corr[high_corr, high_corr]
+
+corrplot(pi_hi_corr, method="color", tl.pos = "n")
+```
+
+** Note: The above plot may not appear correctly (you might see black squares which is unintended).**
+
+
+### PCA using all data
+
+First convert all categorical features to dummy features(one-hot-encoding) and scale the date using min-max scaler (0 to 1).
+
+```{r}
+library(caret)
+all_piData <- subset(all_piData, select = -periop_tempmax_avg)
+write.csv(all_piData, "all_piData.csv")
+all_piData <- read.csv("all_piData.csv")
+
+dmy <- dummyVars(" ~ .", data = all_piData[,4:237], fullRank=T)
+all_dmy <- data.frame(predict(dmy, newdata = all_piData[,4:237]))
+all_mm <- min_max(all_dmy)
+write.csv(all_piData, "all_piData_dummy.csv")
+```
+
+```{r}
+all.pca <- prcomp(all_mm)
+
+pca.cum(all.pca)
+```
+
+## Logistic regression
+
+### Split the data to training and testing set
+
+```{r}
+library(dplyr)
+
+# Create Training Data
+pi_ones <- all_piData[which(all_piData$pi == 1), ]  # all 1's
+pi_zeros <- all_piData[which(all_piData$pi == 0), ]   # all 0's
+set.seed(100)  # for repeatability of samples
+pi_ones_training_rows <- sample(1:nrow(pi_ones), 0.7*nrow(pi_ones))  # 1's for training
+pi_zeros_training_rows <- sample(1:nrow(pi_zeros), 0.7*nrow(pi_zeros))  # 0's for training. Pick as many 0's as 1's
+training_ones <- pi_ones[pi_ones_training_rows, ]  
+training_zeros <- pi_zeros[pi_zeros_training_rows, ]
+trainingData <- rbind(training_ones, training_zeros)  # row bind the 1's and 0's 
+
+# Create Test Data
+test_ones <- pi_ones[-pi_ones_training_rows, ]
+test_zeros <- pi_zeros[-pi_zeros_training_rows, ]
+testData <- rbind(test_ones, test_zeros)  # row bind the 1's and 0's 
+```
+
+
+```{r fig.width=12, fig.height=8}
+rm_vars <- c("pi", "pi_dayfromadmit", "pressure_injury_poa")
+x_training = trainingData[, - which(names(trainingData) %in% rm_vars)]
+x_test = testData[, - which(names(testData) %in% rm_vars)]
+```
+### Build and train glmnet model
+
+```{r fig.width=12, fig.height=8}
+library(glmnet)
+
+cvlog = cv.glmnet(data.matrix(x_training), trainingData$pi, family = "binomial", type.measure = "class")
+
+plot(cvlog)
+```
+
+```{r}
+library(caret)
+y_test_pred <- predict(cvlog, newx = data.matrix(x_test), s = "lambda.min", type = "class")
+xtab <- table(as.factor(testData$pi), as.factor(y_test_pred))
+confusionMatrix(xtab, positive ="1")
+```
+### Compare the above result with a dummy prediction
+
+```{r}
+y_dummy <- factor(rep("0",nrow(testData)), levels = c("0","1"))
+table(y_dummy)
+dummytab <- table(as.factor(testData$pi), y_dummy)
+dummytab
+confusionMatrix(dummytab, positive ="1")
+```
+
+## Random Forest Classification
+
+```{r message=FALSE}
+# install.packages("randomForest")
+library(randomForest)
+set.seed(12)
+x_training$pi <- trainingData$pi
+x_training$pi <- as.factor(x_training$pi)
+system.time(rf.fit <- randomForest(pi~. , data=x_training,importance=TRUE,ntree=200,mtry=50))
+varImpPlot(rf.fit, cex=0.5); print(rf.fit)
+```
+
+```{r}
+# save the model to disk
+saveRDS(rf.fit, "./rf_fit_model.rds")
+```
+
+## Class size rebalancing
+
+First, I will try under sampling the majority class to be 90% of the sample and keep the minority(positive) class the same as the original sample size.
+
+```{r}
+set.seed(1234)
+library(unbalanced)
+
+output <- as.factor(all_piData$pi)
+input <- select(all_piData, -pi)
+
+#configure sampling parameters
+#ubConf <- list(type="ubUnder", k=10, perc=50, method="percPos", w=NULL)
+
+#apply oversampling
+data <- ubUnder(X=input, Y=output, perc = 20, method = "percPos", w = NULL)
+#oversampled dataset
+overData <- data.frame(data$X, Class=data$Y)
+#check the frequency of the target variable after oversampling
+summary(overData$Class)
+```
+
+### Stratified sampling
+
+```{r}
+#library(caret)
+train.index <- createDataPartition(overData$Class, p = .7, list = FALSE)
+train <- overData[ train.index,]
+test  <- overData[-train.index,]
+
+table(train$Class)
+
+table(test$Class)
+```
+
+### logistic regression with majority under sampled
+
+```{r}
+rm_vars <- c("Class", "pi_dayfromadmit", "pressure_injury_poa")
+x_training = train[, - which(names(train) %in% rm_vars)]
+x_test = test[, - which(names(test) %in% rm_vars)]
+```
+
+
+```{r fig.width=12, fig.height=8}
+library(glmnet)
+cvlog = cv.glmnet(data.matrix(x_training), train$Class, family = "binomial", type.measure = "class")
+
+plot(cvlog)
+```
+#### Performance on the training set
+
+```{r}
+y_train_pred <- predict(cvlog, newx = data.matrix(x_training), s = "lambda.min", type = "class")
+xtab <- table(as.factor(train$Class), as.factor(y_train_pred))
+confusionMatrix(xtab, positive ="1")
+```
+
+#### Fine tune alpha
+
+```{r}
+cvlog.5 = cv.glmnet(data.matrix(x_training), train$Class, family = "binomial", 
+                  type.measure = "class", alpha = 0.5)
+
+cvlog.0 = cv.glmnet(data.matrix(x_training), train$Class, family = "binomial", 
+                  type.measure = "class", alpha = 0.0)
+
+par(mfrow=c(1,2))
+plot(cvlog.5)
+plot(cvlog.0)
+```
+
+
+#### Performance on the test set
+
+```{r}
+library(caret)
+y_test_pred <- predict(cvlog, newx = data.matrix(x_test), s = "lambda.min", type = "class")
+xtab <- table(as.factor(test$Class), as.factor(y_test_pred))
+confusionMatrix(xtab, positive ="1")
+```
+
+
+### Try Deep learning techniques
+
+I will use keras package for this.
+
+#### Prepaper the data
+
+```{r}
+write.csv(all_dmy, "all_piData_dmy.csv")
+y <- all_dmy$pi
+rm_vars <- c("pi", "pi_dayfromadmit", "pressure_injury_poa")
+X = all_dmy[, - which(names(all_dmy) %in% rm_vars)]
+```
+
+Split the data
+
+```{r}
+set.seed(1234)
+train.index <- createDataPartition(y, p = .75, list = FALSE)
+
+# We can try min max scaling
+X_train <- min_max(X[ train.index,])
+X_test  <- min_max(X[-train.index,])
+
+y_train <- y[ train.index]
+y_test  <- y[-train.index]
+
+```
+
+#### Construct the model
+
+```{r eval=FALSE, echo=FALSE}
+library(keras)
+
+model <- keras_model_sequential() 
+```
+
+```{r eval=FALSE, echo=FALSE}
+model %>% 
+  layer_dense(units = 500, activation = 'relu', input_shape = ncol(X_train)) %>% 
+  layer_dropout(rate = 0.4) %>% 
+  layer_dense(units = 128, activation = 'relu') %>%
+  layer_dropout(rate = 0.3) %>%
+  layer_dense(units = 2, activation = 'sigmoid')
+
+# Print a summary of a model
+summary(model)
+```
+
+Compile the model
+
+```{r eval=FALSE, echo=FALSE}
+
+model %>% compile(
+  loss = 'binary_crossentropy',
+  optimizer = 'adam',
+  metrics = c('accuracy')
+)
+
+history <- model %>% fit(
+  X_train, y_train, 
+  epochs = 100, 
+  batch_size = 10,
+  validation_split = 0.3
+)
+```
+
+

@@ -1,0 +1,374 @@
+---
+title: "Analysis of aggregate data"
+author: "Zerihun Bekele"
+date: "8/21/2019"
+output: 
+  html_document:
+    code_folding: show
+    keep_md: true
+    toc: true
+    toc_depth: 3
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Import libraries
+
+```{r message=FALSE}
+library("mi")
+library("dplyr")
+```
+
+## Read static data
+
+```{r}
+static_data <- read.csv("Analysis/static_agg_data.csv", header=T, row.names = 1)
+print(dim(static_data))
+static_data[1:10, 1:4]
+```
+
+### Number of cases with PI 
+
+The NA values in the `pi` and `pi onset date` variables imply pressure injury was not observed or a negative result, so we have to convert the NAs to 0 and the rest to 1.
+
+```{r fig.width=6, fig.asp=0.7}
+
+print(c("Number of cases with PI = ", sum(!is.na(static_data$pi))), quote = FALSE)
+
+# Replace NA with 0 and convert to factor
+#static_data$pi <- pi.data$pi
+static_data$pi[is.na(static_data$pi)] <- 0
+static_data$pi_dayfromadmit[is.na(static_data$pi_dayfromadmit)] <- Inf
+
+static_data$pi <- factor(static_data$pi, levels=c(0,1), labels = c("No", "Yes"))
+
+# Calculate percent pi and non pi
+pi.rate <- round(prop.table(table(static_data$pi))*100,2)
+
+# Plot chart
+{par(mai=c(0.5,0.6,0.5,0.2))
+barplot(pi.rate, xlim = c(0,2),width = 0.75, ylim = c(0,100), col = c("tomato", "green3"), main = "Cases with PI, %")
+text(y = pi.rate, x = c(0.6,1.5), labels = paste(pi.rate, '%'), pos=3, xpd = T, adj = 0.5, cex = 1.2, offset = 0.3)
+box()}
+```
+
+### Missing values in the static data 
+
+```{r}
+na.count <- function(df) apply(is.na(df), 2, sum )
+```
+
+```{r fig.height=12, fig.width=8}
+na.static <- na.count(static_data)
+
+# Sort and compute percent missing
+na.static <- sort(na.static[na.static > 0]/nrow(static_data)*100)
+
+clrs = circlize::colorRamp2(c(0,90),c("green","red"), 0.2)(1:100)
+
+# Define a function to plot barplot
+na.barplot <- function(df) {
+  par(mai=c(0.5, 2.8, 0.4,0.2))
+  xbar <- barplot(df, xlim = c(0, max(df)*1.2),
+                ylim = c(1,length(df)*1.2),
+                names.arg = F, border = NA, horiz = T, 
+                main = "Percent missing", 
+                col = clrs[as.integer(df+1)])
+  text(x= -5, y=xbar, labels = names(df), xpd=T, 
+     pos= 2, adj = 1, cex=0.9, offset = -0.5)
+  text(x= df, y=xbar, labels = round(df,1), 
+     xpd=T, pos= 4, adj = 1, cex=0.8, offset = 0.5)
+  box()}
+
+# Plot barplot for static missing values
+na.barplot(na.static)
+```
+
+### Get rows with at least one missing feature
+
+```{r fig.width=10, fig.asp=0.8}
+na.row.idx <- apply(is.na(static_data), 1, any)
+na.rows <- static_data[na.row.idx, ]
+print(dim(na.rows))
+
+z <- apply(na.rows, 2, function(x) ifelse(is.na(x), 0, 1))
+
+par(mai=c(1.5,0.8,0.5,0.2), oma = c(3,0.5,0.1, 0.1))
+image(1:ncol(z), 1:nrow(z),t(z), xaxt='n',
+        ylab = "Individuals", xlab = "",
+        main = "Individuals with at least one feature missing")
+axis(1, 1:ncol(z), labels = NA, tck = -0.02)
+text(1:ncol(na.rows), -nrow(na.rows)/25, labels = names(na.rows), srt = 90, 
+       adj = 0, xpd = T, pos = 2, cex = 0.8, offset = 0)
+mtext("Note: The pale yelow color indicates missing values.",outer = T, side = 1, line = 1,
+        cex = 0.8,adj = 0, col = "red")
+```
+
+## Read time series binary data
+
+```{r}
+ts_bi_data <- read.csv("Analysis/ts_binary_agg.csv", header=T, row.names = 1)
+print(dim(ts_bi_data))
+ts_bi_data[1:15,1:5]
+```
+
+### Checking missing values
+
+```{r}
+na.ts_bi <- na.count(ts_bi_data)
+
+# Compute percent missing
+na.ts_bi <- sort(na.ts_bi[na.ts_bi > 0]/nrow(ts_bi_data)*100)
+
+# Plot barplot for static missing values
+print(na.ts_bi)
+```
+
+
+## Read time series numeric data
+
+```{r}
+ts_num_data <- read.csv("Analysis/ts_numeric_agg.csv", header=T, row.names = 1)
+print(dim(ts_num_data))
+ts_num_data[1:15, 1:5]
+```
+
+### Checking missing values
+
+```{r fig.asp=2}
+na.ts_num <- na.count(ts_num_data)
+
+# Compute percent missing
+na.ts_num <- sort(na.ts_num[na.ts_num > 0]/nrow(ts_num_data)*100)
+
+# Plot barplot for static missing values
+na.barplot(na.ts_num)
+```
+
+```{r}
+get.na.rows <- function(df) {
+  na.row.idx <- apply(is.na(df), 1, any)
+  na.rows <- df[na.row.idx, ]
+  print(dim(na.rows))
+  par(mai=c(1.5,0.8,0.5,0.2), oma = c(3,0.5,0.1, 0.1))
+  image(1:ncol(na.rows), 1:nrow(na.rows), t(as.matrix(na.rows)), xaxt='n',
+        ylab = "Individuals", xlab = "",
+        main = "Individuals with at least one feature missing")
+  axis(1, 1:ncol(df), labels = NA, tck = -0.02)
+  text(1:ncol(na.rows), -nrow(na.rows)/20, labels = names(na.rows), srt = 90, 
+       adj = 0, xpd = T, pos = 2, cex = 0.8, offset = 0)
+  mtext("Note: white color indicates missing values.",outer = T, side = 1, line = 1,
+        cex = 0.8,adj = 0, col = "red")
+}
+```
+
+
+## Read braden aggregate data
+
+```{r}
+braden_data <- read.csv("Analysis/braden_agg_perc.csv", header=T, row.names = 1)
+print(dim(braden_data))
+braden_data[1:15, 1:5]
+```
+
+### Checking missing values
+
+```{r fig.asp=2}
+na.braden <- na.count(braden_data)
+
+# Compute percent missing
+na.braden <- sort(na.braden[na.braden > 0]/nrow(braden_data)*100)
+
+# Plot barplot for static missing values
+na.barplot(na.braden)
+```
+
+```{r fig.width=8, fig.asp=0.7}
+get.na.rows(braden_data)
+```
+
+The above plot indicates that all the missing rows are correlated.
+
+## Read periop numeric data
+
+```{r}
+periop_num_data <- read.csv("Analysis/periop_numeric_agg.csv", header=T, row.names = 1)
+print(dim(periop_num_data))
+periop_num_data[1:15, 1:4]
+```
+
+### Checking missing values
+
+```{r fig.width=6, fig.asp=1.5}
+na.periop_num <- na.count(periop_num_data)
+
+# Compute percent missing
+na.periop_num <- sort(na.periop_num[na.periop_num > 0]/nrow(periop_num_data)*100)
+
+# Plot barplot for static missing values
+na.barplot(na.periop_num)
+```
+
+```{r fig.width=8, fig.asp=0.7 }
+get.na.rows(periop_num_data)
+```
+
+## Read periop binary (yes/no) data
+
+```{r}
+periop_bi_data <- read.csv("Analysis/periop_yn_agg.csv", header=T, row.names = 1)
+print(dim(periop_bi_data))
+periop_bi_data[1:10, 1:4]
+```
+
+### Checking missing values
+
+**Here it is not clear whether there is a missing value or there was no use of the specific type of treatment.**
+
+```{r fig.width=6, fig.asp=1.5}
+na.periop_bi <- na.count(periop_bi_data)
+print(any(na.periop_bi>0))
+```
+
+## Read location data
+
+```{r}
+location_data <- read.csv("Analysis/location_agg.csv", header=T, row.names = 1)
+print(dim(location_data))
+location_data[1:10,1:4]
+```
+
+### Checking missing values
+
+```{r fig.width=6, fig.asp=1.5}
+na.location <- na.count(location_data)
+print(any(na.location>0))
+
+# Compute percent missing
+na.location <- sort(na.location[na.location > 0]/nrow(location_data)*100)
+
+# Plot barplot for static missing values
+na.barplot(na.location)
+```
+
+## Read surgical data
+
+```{r}
+surgical_data <- read.csv("Analysis/surgical_data_agg.csv", header=T, row.names = 1)
+print(dim(surgical_data))
+
+surgical_data[1:10,1:4]
+
+unique(gsub("_\\d+$","", names(surgical_data)))
+```
+
+**We need to figure out what each the values in these variables mean**
+
+### Checking missing values
+
+```{r fig.width=6, fig.asp=2}
+na.surgical <- na.count(surgical_data)
+print(any(na.surgical>0))
+
+# Compute percent missing
+na.surgical <- sort(na.surgical[na.surgical > 0]/nrow(surgical_data)*100)
+
+# Plot barplot for static missing values
+na.barplot(na.surgical)
+```
+
+## Select features with NA less than 30%
+
+```{r}
+all.data <- cbind(static_data, ts_bi_data,ts_num_data,braden_data,
+                  periop_bi_data,periop_num_data, location_data, surgical_data)
+
+all_vars_na <- na.count(all.data)
+na.perc <- sort(all_vars_na/nrow(all.data)*100)
+
+vars_30 <- names(na.perc)[which(na.perc <= 30,)]
+
+all.data.30 <- all.data[,vars_30]
+write.csv(all.data.30, "all.data.30.csv")
+
+xx <- hist(na.perc, breaks = 10, col = "palegreen", ylim = c(0,200))
+text(xx$breaks+5, xx$counts, labels = xx$counts, pos = 3)
+
+```
+
+```{r}
+library(DT)
+
+datatable(all.data.30[sample(nrow(all.data.30),100),])
+```
+
+
+## Select features with NA less than 10%
+
+```{r}
+vars_10 <- names(na.perc)[which(na.perc <= 10,)]
+
+all.data.10 <- all.data[,vars_10]
+
+```
+
+## Analyze & Impute missing data for static data type
+
+```{r message=FALSE, fig.width=12, fig.height=8}
+library("betareg"); library("mi")
+
+# Get variables with 30 pct less missing values and drop pi and pi day from onset features
+static.na <- na.count(static_data[, -which(names(static_data) %in% c("pi", "pi_dayfromadmit"))])*100/nrow(static_data)
+static_data.30pct <- static_data[, names(static.na)[which(static.na <= 30,)]]
+
+# get show the missing information matrix
+mdf <- missing_data.frame(static_data.30pct) 
+
+image(mdf)
+```
+
+```{r}
+show(mdf)
+```
+
+### Start imputation
+
+```{r message=FALSE}
+#imputations <- mi(mdf, n.iter = 5, n.chains = 3, max.minutes = 10, verbose = TRUE)
+#show(imputations)
+#summary(static_data.30pct)
+library(mice)
+system.time(imputed_Data <- mice(static_data.30pct, m=5, maxit = 30, seed = 500, printFlag = F))
+save(imputed_Data, file = "static_imputed_Data.RData")
+#md.pattern(static_data.30pct)
+summary(imputed_Data)
+
+densityplot(imputed_Data)
+```
+```{r}
+library(dplyr)
+library(caret)
+static_imp1 <- complete(imputed_Data, 1)
+#names(static_imp1)[sapply(static_imp1, is.factor)]
+
+cat_data <- select_if(static_imp1, is.factor)
+```
+
+Imputation using the `missForest' package.
+
+```{r}
+library(missForest)
+library(doParallel)
+registerDoParallel(cores=3)
+system.time(static_imputed <- missForest(xmis = static_data.30pct, maxiter = 10, parallelize = 'variables', ntree = 50))
+```
+
+
+
+
+
+
+
