@@ -1,0 +1,1029 @@
+---
+title: "PIMPS PressureInjury"
+author: "SOCR COllaboration (Dinov-Anderson-Tschannan)"
+date: "May 10, 2019"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("G:/My Drive/PIPM_Data_R_code")
+```
+
+## Overview
+
+[GDrive](https://drive.google.com/drive/folders/15A2ytB_foR6pwlQ2M6imbjsPDnrxNdYl)
+
+This project involves a large, high-dimensional and time series dataset related to pressure injuries (bed ulcers). Specifically, your thoughts on segmentation/clustering/classification of this data are of interest. Also cross-validation strategy thoughts would help us. 
+
+## Aims
+
+#### Aim 1: Develop and validate a predictive model of PI risk among hospitalized surgical patients. 
+
+ - Identify clusters associated with PI risks for hospitalized surgical patients.
+ 
+ - Develop and validate a predictive model of PI risk tailored to the highest PI risk clusters. 	
+
+#### Aim 2: Conduct a pilot study to determine the implementation and subsequent impact of a dynamic, personalized PI prevention intervention informed by the predictive model from Aim 1 on hospital acquired PIs among surgical patients.
+
+## Import data
+
+```{r import data, echo=T, message=F}
+library("memisc")
+system.time({
+  data <- as.data.set(spss.system.file("July_2019_Data_Docs/PIPM_6-24-19.sav"))
+  pi.data <- as.data.frame(data)
+  })
+
+dim(pi.data)
+
+#write.table(pi.data, "PIPM_cases.txt", sep = "\t")
+#PI.data <- read.table("PIPM_cases.txt", header=T, sep = "\t")
+# [1]   100 11180
+
+# 30
+# 40
+# < 40
+# Supervised and unsupervised model
+# Clusters
+# Hierarichical clustering
+# 9 o'clock next firday 23rd
+
+```
+
+## Get the static data
+
+Next, separate the static data, which is located from column 1 to 58.
+
+```{r message=F}
+library(dplyr)
+static_data <- pi.data[,1:58]
+
+dim(static_data)
+```
+
+Add aditional static data and remove some redundent variables from the dataframe.
+
+```{r remove.date.vars}
+#Remove non relevant variables
+rm_vars <- c("encounterid", "admitdt", "deceased_date", "pi_dateonset","termcodemapped_group", "icu_stay", "termc0", "dischargedt")
+
+static_data <- subset(static_data, select = !(colnames(static_data) %in% rm_vars))
+static_data <- cbind(static_data, dplyr::select(pi.data, dplyr::starts_with("lab")))
+
+write.csv(static_data, "Analysis/static_agg_data.csv")
+
+dim(static_data)
+```
+Print the variable names in the static data.
+
+```{r print.col.names, eval=FALSE}
+# Print variable names
+for (i in seq(length(static_data)) ) {
+  print(c(colnames(static_data)[i], class(static_data[,i])))
+  
+}
+```
+
+### Number of cases with PI
+
+```{r}
+
+print(c("Number of cases with PI = ", sum(!is.na(static_data$pi))), quote = FALSE)
+
+# Replace NA with 0 and convert to factor
+static_data$pi <- pi.data$pi
+static_data$pi[is.na(static_data$pi)] <- 0
+
+static_data$pi <- factor(static_data$pi, levels=c(0,1), labels = c("No", "Yes"))
+
+# Calculate percent pi and non pi
+pi.rate <- round(prop.table(table(static_data$pi))*100,2)
+
+# Plot chart
+{par(mai=c(0.5,0.6,0.5,0.2))
+barplot(pi.rate, xlim = c(0,2),width = 0.75, ylim = c(0,100), col = c("tomato", "green3"), main = "Cases with PI, %")
+text(y = pi.rate, x = c(0.6,1.5), labels = paste(pi.rate, '%'), pos=3, xpd = T, adj = 0.5, cex = 1.2, offset = 0.3)
+box()}
+```
+
+
+## Generate summary statistics 
+
+```{r print.summary}
+for (i in 1:length(static_data)) {
+  print(colnames(static_data)[i])
+  print(summary(static_data[,i]))
+  
+}
+
+```
+
+## Generate simple plots
+
+```{r race_ethnicity, fig.width=10, fig.height=8}
+library(ggplot2)
+
+ggplot(static_data, aes(x = race, fill = ethnicity)) +
+   geom_bar() +
+   theme(axis.text.x = element_text(angle = 15, hjust = 1, size=10))
+
+```
+
+```{r age_los, echo=FALSE, fig.height=6, fig.width=10}
+
+ggplot(static_data, aes(x = ageinyears, y = los)) +
+   geom_point(aes(color = admissiontype), size=2) +
+   theme(axis.text.x = element_text(size=12))
+
+ggplot(static_data, aes(x = los, color=factor(pi, labels = c("No", "Yes")))) +
+  geom_density(size=1) +
+  labs(title = "Length of stay", color = "PI")+
+  theme(legend.position = c(0.9,0.9))+
+  scale_color_manual(values=c("tomato","yellowgreen"))
+
+```
+
+```{r bar_hist_plot}
+#Let us generate a histogram of a barplot to see what the data looks like
+
+bar_hist <- function (dt) {
+  n.row <- ceiling(length(dt)/5)
+  par(mfrow=c(n.row,5), cex=0.7, cex.main=1.2,
+      mai=c(0.3,1,0.3,0.25), 
+      mar=c(2.5,1.8,2.5,1.5))
+  
+  for (i in seq(length(dt)) ) {
+  
+    #Get the column
+    column.i <- dt[,i]
+    ttle <- colnames(dt)[i]
+    
+    # We want to plot barplot if the column/feature is a categorical type
+    bar = is.factor(column.i)
+    #Plot bar plot if it is a factor variable
+    if (bar) {
+      x.prop <- prop.table(table(column.i))
+      barplot(x.prop, xpd=FALSE, main = ttle, 
+              col = "#CC79A7", 
+              ylim = c(0,max(x.prop)+0.1))
+      
+    }
+    
+    #Plot a density if it is a numeric
+    else {
+      #plot(density(column.i, na.rm = T), lwd=2, main = ttle)
+      #hist(column.i, main =colnames(x)[i] )
+      boxplot(column.i, horizontal = T)
+    }
+  }
+
+}
+
+```
+
+```{r plots, fig.width=14, fig.height=10}
+# Use the above fucntion to plot the data
+bar_hist(static_data[,1:25])
+bar_hist(static_data[,26:50])
+bar_hist(static_data[,51:69])
+
+```
+
+## Bivariate plots
+
+```{r mosaic.plot}
+#Plot for all data set
+library(vcd)
+(PGA <- structable(admissiontype ~ pressure_injury_poa + gender, data = static_data))
+mosaic(PGA, shade = TRUE, legend=TRUE)
+
+# Plot only for PI =Yes
+
+pi.data <- subset(static_data, !is.na(pi))
+(pi.PGA <- structable(admissiontype ~ pressure_injury_poa + gender, data = pi.data))
+mosaic(pi.PGA, shade = TRUE, legend=TRUE)
+
+pairs(PGA, space = 0.15)
+```
+
+```{r}
+
+hist(static_data$pi_dayfromadmit, 
+     col = "tan2", 
+     main = "PI development day from admission",
+     xlab = "PI date onset",
+     freq = F)
+
+hist(static_data$los, 
+     col = "tan2", 
+     main = "Length of stay",
+     xlab = "Day",
+     freq = F)
+```
+
+
+```{r fig.width=8}
+ggplot(static_data, aes(x = los, y = pi_dayfromadmit)) +
+  geom_point(aes(color=obesity, alpha=0.2, size=weightkg))+
+  guides(alpha="none")
+
+```
+
+**Note: Negative days for PI day onset doesn't make sense.**
+
+```{r fig.width=10}
+clr1 = c( "tomato2", "orange", "steelblue2")
+
+ggplot(static_data) + 
+  geom_histogram(aes(x = ageinyears, fill = admissiontype), color = 'grey', bins = 7) +
+  facet_wrap(~ gender) +
+  ggtitle("For all data")+
+  theme(plot.title = element_text(hjust = 0.5))+
+  scale_fill_brewer(palette="Set1")
+
+ggplot(pi.data) + 
+  geom_histogram(aes(x = ageinyears, fill = admissiontype), color = 'grey', bins = 7) +
+  facet_wrap(~ gender) +
+  ggtitle("For PI positive data")+
+  theme(plot.title = element_text(hjust = 0.5))+
+  scale_fill_brewer(palette="Set1")
+```
+
+```{r}
+#par(mfrow=c(1,2))
+ggplot(static_data) + 
+  geom_point(aes(x = ageinyears, y = los, color=pi, size=as.integer(los)/2, alpha=0.3)) +
+  guides(alpha="none")+
+  scale_size_continuous(name = "Length \nof stay")
+
+ggplot(static_data) + 
+  geom_point(aes(x = los, y = bmi, size = ageinyears, alpha=0.2)) +
+  guides(alpha="none")
+```
+```{r}
+ggplot(static_data, aes(x = pi, y= weightkg))+
+  geom_boxplot()
+
+#ggplot(static_data, aes(x = weightkg, color = pi))+
+#  geom_density()
+```
+## Check missing values in the static data
+
+```{r fig.height=12, fig.width=8}
+na.count <- apply(apply(static_data, 2, is.na), 2, sum)
+na.count <- sort(na.count[na.count > 0]/nrow(static_data)*100)
+
+
+{
+par(mai=c(0.5, 2.8, 0.4,0.2))
+clrs = circlize::colorRamp2(c(0,90),c("green","red"), 0.2)
+xbar <- barplot(na.count, xlim = c(0, max(na.count)+10), 
+                names.arg = F, border = NA, horiz = T, 
+                main = "Percent missing", 
+                col = clrs(0:length(na.count)))
+text(x= -5, y=xbar, labels = names(na.count), xpd=T, 
+     pos= 2, adj = 1, cex=0.9, offset = -0.5)
+text(x= na.count, y=xbar, labels = round(na.count,1), 
+     xpd=T, pos= 4, adj = 1, cex=0.8, offset = 0.5)
+box()}
+```
+## Get timeseries data
+
+```{r ts_data, message=FALSE}
+library(tidyverse)
+ts_data <- dplyr::select(pi.data, starts_with('day'))
+var.names <- colnames(ts_data)
+#var.names <- gsub("\\d+", "", var.names)
+var.names <- gsub("day\\d+\\_","", var.names)
+unique.vars <- unique(var.names)
+dim(ts_data)
+unique.vars
+```
+### Compute summaries for the daily data
+
+#### Aggregate binary features
+
+Select binary features and compute summaries.
+
+First, let us compute the percent of time a treatment was given over the length of stay (LOS).
+
+```{r}
+#Binary features
+bi_ts_vars <- c("steroid", "vasopressor", "parenteral_nutrition", "intubated",
+                "incontinent", "fecaldevice", "potubefeed")
+
+# Empty data frame to hold the results
+ts_bi_perc <- as.data.frame(matrix(data=NA, nrow = nrow(ts_data), ncol = length(bi_ts_vars)))
+colnames(ts_bi_perc) <- paste(bi_ts_vars, "perc", sep = "_")
+
+# Table for yes or no
+ts_bi_use <- ts_bi_perc
+colnames(ts_bi_use) <- paste(bi_ts_vars, "used", sep = "_")
+
+# Compute percent: # days with treatment/# los in hospital
+treatment_percent <- function (x) (apply(x, 1, sum, na.rm=T)*100/pi.data$los)
+
+for (i in 1:length(bi_ts_vars)) {
+  # Select a specific treatment type one by one
+  trt.dt <- dplyr::select(ts_data, ends_with(bi_ts_vars[i]))
+  
+  # Calculate percent of los with each type of treatment
+  ts_bi_perc[,i] <- treatment_percent(trt.dt)
+  
+  # Check if there is use of a specific treatment type.
+  ts_bi_use[,i] <- apply(!is.na(trt.dt), 1, any)
+}
+
+summary(ts_bi_perc)
+
+summary(ts_bi_use)
+
+# Combine the time series binary data
+ts_bi_agg <- cbind(ts_bi_use, ts_bi_perc)
+
+# Write to file
+write.csv(ts_bi_agg, "Analysis/ts_binary_agg.csv")
+
+```
+#### Plot distribution
+
+```{r binary.perc.plot, fig.height=6 }
+par(mfrow=c(3,2), oma = c(0.5,1,5,1), mai=c(0.5,0.6,0,0))
+
+for (i in 1:6) {
+  xx <- hist(ts_perc[,i], main ="", freq = F, col = "red", breaks = 10, border = NA, xlab = "")
+  text(50, max(xx$density), bi_ts_vars[i], cex = 1.5, pos = 1 )
+  box()
+}
+mtext(" Histograms of percent of LOS with a specific treatment", side = 3, line = 2, outer = T, cex = 1.3, adj = 0)
+
+```
+
+
+#### Compute summaries for numeric features
+
+Most of these features have a daily min and max value. What we want is the average of both. Therefore, we are going to calculate the mean of the max and min values of all features for each individual. This will generate a dataframe with rows equal to the number of subjects and colums equal to the number of unique features, then we can plot the distribution of the means.
+
+```{r ts.numeric.aggregation}
+# Get non-binary data variable names
+non_bi_vars <-setdiff(unique.vars, bi_ts_vars)
+
+# get the numeric variables
+ts_num_vars <- grep("braden", non_bi_vars, value = T, invert = T)
+
+# get variables for minimum values
+ts_num_min_vars <- grep("min", ts_num_vars, value = T)
+
+# table to hold absolute min value for each variable
+ts_min_tbl <- data.frame(matrix(NA, nrow = nrow(ts_data), ncol = length(ts_num_min_vars)))
+colnames(ts_min_tbl) <- ts_num_min_vars
+
+# Get variables with max values
+ts_num_max_vars <- grep("max", ts_num_vars, value = T)
+
+# table to hold absolute min value for each variable
+ts_max_tbl <- data.frame(matrix(NA, nrow = nrow(ts_data), ncol = length(ts_num_max_vars)))
+colnames(ts_max_tbl) <- ts_num_max_vars
+
+# Compute absolute minimum for the numeric variables
+get.min <- function(x) ifelse(all(is.na(x)), NA, min(x, na.rm = T))
+
+for (i in ts_num_min_vars) {
+  min_tbl <- select(ts_data, contains(i))
+  ts_min_tbl[[i]] <- apply(min_tbl, 1, get.min)
+}
+
+# Compute absolute maximum for the numeric variables
+get.max <- function(x) ifelse(all(is.na(x)), NA, max(x, na.rm = T))
+
+for (i in ts_num_max_vars) {
+  max_tbl <- select(ts_data, contains(i))
+  ts_max_tbl[[i]] <- apply(max_tbl, 1, get.max)
+}
+
+
+##############################################################
+# Empty tables to hold the results for mean values
+ts_num_mean <- data.frame(matrix(data=NA, nrow = nrow(ts_data), ncol = length(ts_num_vars)))
+colnames(ts_num_mean) <- ts_num_vars
+
+# Compute the mean of min and max for all hospital stay period
+avg_value <- function (x) (apply(x, 1, mean, na.rm=T))
+
+for (i in ts_num_vars) {
+  # Select one type of treatment/feature at a time
+  select_dt <- select(ts_data, contains(i))
+  
+  # Compute the mean across length of stay for each individual
+  ts_num_mean[[i]] <- avg_value(select_dt)
+}
+colnames(ts_num_mean) <- paste0(ts_num_vars, "_avg")
+
+###################################################
+# Combine all numeric aggregate tables to one table
+ts_num_agg <- cbind(ts_min_tbl, ts_max_tbl, ts_num_mean)
+
+write.csv(ts_num_agg, "Analysis/ts_numeric_agg.csv")
+```
+
+# Check completeness of the numeric aggregate table
+
+```{r fig.width=7, fig.height=14}
+num.agg <- apply(ts_num_agg, 2, function(x) sum(!is.na(x))*100/length(x))
+
+{ par(mai=c(0.5, 1.7,0.2,0.2),oma = c(0.5,1,3,1))
+  xbar <- barplot(num.agg, horiz = T, xlim = c(0, 100),
+                  ylim = c(1,length(num.agg)+6), col = "palegreen3",
+                names.arg = F, border = NA)
+  text(x= -5, y=xbar, labels = names(num.agg), xpd=T, 
+     pos= 2, adj = 1, cex=0.9, offset = 0.1)
+  text(x= num.agg, y=xbar, labels = round(num.agg,1),
+       xpd=T, pos= 2, adj = 1, cex=0.8, offset = 0.5)
+  box()
+mtext("Percent completeness of the numeric aggregate dataframe", 
+      side = 3, line = 1, outer = T, cex = 1.3, adj = 0)
+}
+
+```
+
+#### Aggregate Braden matrics variables
+
+Next, aggregation will be done for each braden matrics variables based patient state.
+
+```{r braden.aggregate}
+# get the numeric variables
+ts_braden_vars <- grep("braden", non_bi_vars, value = T)
+
+braden_agg <- data.frame(matrix(NA, nrow = nrow(ts_data), ncol = 4*length(ts_braden_vars)))
+
+# Generate column names for each braden activity and levels
+colnames(braden_agg) <- unlist(lapply(ts_braden_vars, function (x) paste0(rep(x,4), 1:4)))
+
+# Function to get count for each level
+level.counts <- function (x) table(x)[c("1","2","3","4")]
+
+for (i in 1:length(ts_braden_vars)) {
+  braden.tbl <- select(ts_data, contains(ts_braden_vars[i]))
+  
+  k <- 4*(i-1)+1
+  
+  braden_agg[,k:(k+3)] <- data.frame(t(apply(braden.tbl, 1, level.counts)))
+  
+}
+```
+
+##### Check data completeness
+
+```{r fig.width=7, fig.height=14}
+# Check completeness of the columns
+braden.cols <- apply(braden_agg, 2, function(x) sum(!is.na(x)))
+
+{ par(mai=c(0.5, 2,0.2,0.2))
+  xbar <- barplot(braden.cols, horiz = T, xlim = c(0, max(braden.cols)+200),
+                  ylim = c(1,56),
+                names.arg = F, border = NA)
+  text(x= -5, y=xbar, labels = names(braden.cols), xpd=T, 
+     pos= 2, adj = 1, cex=0.9, offset = 0.5)
+  text(x= 1500, y=xbar, labels = round(braden.cols,1),
+       xpd=T, pos= 4, adj = 1, cex=0.8, offset = 0.5)
+  box()}
+```
+The NA values in the above aggregate table does not indicate missing value unless all are NA per metric type, but it means the individual didn't have that kind of activity level throughout their lOS, thus we can replace it with zero. Then, we will normalize the dataframe by converting it into the percent of times an individual that many number of a specific activity over thier LOS.
+
+```{r }
+# We can drop columns with zero counts.
+braden_agg <- braden_agg[, braden.cols != 0]
+
+# Calculate the percent of los with a specific activity test
+# First set all NAs to zero
+braden_agg_perc <- apply(braden_agg, 2, function (x) ifelse(is.na(x), 0, x))
+
+braden_agg_perc <- as.data.frame(apply(braden_agg_perc, 2, function (x) 100*x/pi.data$los), col.names = names(braden_agg))
+
+write.csv(braden_agg_perc, "Analysis/braden_agg_perc.csv")
+
+# Replace back to NA if all row values are zero
+# First identify which rows are all zeros
+braden.nas <- c()
+all.nas.idx <- c()
+for (i in ts_braden_vars) {
+  select.tbl <- select(braden_agg_perc, contains(i))
+  na.rows <- apply(select.tbl, 1, sum) == 0
+  braden_agg_perc[na.rows, names(select.tbl)] <- NA
+  braden.nas <- append(braden.nas, sum(na.rows))
+  all.nas.idx <- union(all.nas.idx, which(na.rows))
+}
+
+# The number of missing values in each category
+names(braden.nas) <- ts_braden_vars
+print(braden.nas)
+
+```
+
+```{r fig.width=10, fig.height=14}
+braden_index <- gsub("braden","", names(braden_agg_perc))
+par(mfrow=c(12,4), oma = c(0.5,1,4,1), mai=c(0.2,0.2,0.1,0.1))
+for (i in 1:ncol(braden_agg_perc)) {
+  xx <- hist(braden_agg_perc[,i], main="", freq=F, breaks = 10, border = NA, col = "red", xlab="")
+  text(50, max(xx$density), braden_index[i], cex = 1.3, pos = 1 )
+  box()
+}
+mtext(" Histograms of percent of LOS vs percent individual with a specific braden activity level", side = 3, line = 2, outer = T, cex = 1.3, adj = 0)
+
+```
+
+#### Analyze missing data in the Braden dataframe
+
+```{r fig.width=12, fig.height=8}
+library("betareg"); library("mi")
+
+# get show the missing information matrix           
+mdf <- missing_data.frame(braden_agg_perc) 
+#show(mdf)
+image(mdf)
+```
+
+#### Analyze missing data for timeseries aggregate dataframe
+
+```{r fig.width=12, fig.height=8}
+# Combine all time series aggregate tables
+ts_agg_combined <- cbind(ts_bi_perc, ts_bi_use, ts_num_agg, braden_agg_perc)
+# get show the missing information matrix           
+mdf <- missing_data.frame(ts_agg_combined) 
+#show(mdf)
+image(mdf)
+
+```
+
+
+```{r}
+# Check pi after removing NAs
+table(!is.na(static_data$pi[-all.nas.idx]))
+```
+
+## Agregation of individual time series data
+
+### Location data
+
+```{r get_location_data}
+library(dplyr)
+
+loc_data <- dplyr::select(pi.data, starts_with('location'))
+
+dim(loc_data)
+
+# Calculate length of stay in each locations
+?reshape2::melt
+locs_los <- dplyr::select(loc_data, contains('enddate')) - dplyr::select(loc_data, contains('startdate'))
+#Convert seconds to days
+locs_los <- locs_los/86400
+
+colnames(locs_los) <- paste0('loc_', seq(1,15), '_los')
+
+locs_los <- as.data.frame(lapply(locs_los, as.numeric))
+head(locs_los)
+
+# Compute the number of individuals in each locations
+loc.stay <- apply(!is.na(locs_los), 2, sum)
+
+# Compute number of transfers for each individual
+loc.trans <- apply(!is.na(locs_los), 1, sum)
+locs_los["transfers"] <- loc.trans
+
+loc_names <- dplyr::select(loc_data, -ends_with('date'))
+
+all_names <- c()
+for (i in 1:15) {
+  all_names <- c(all_names, unique(as.character(loc_names[,i])))
+}
+
+loc_data["rm_locs"] <- (loc_names$location_1 %in% c("MH 10E PED ICU","MH 8E ACUTE CARE","UH 9C ADULT PSYCH"))
+write.csv(loc_data, "Analysis/location_data.csv")
+
+
+sum(loc_data$rm_locs)
+write.csv(locs_los, "Analysis/location_agg.csv")
+# Top 15 transfers
+sort(loc.trans, decreasing = T)[1:15]
+
+# Number of individuals with no location info
+sum(loc.trans == 0)
+
+ddd <- apply(loc_data[loc_data$rm_locs,4:45],1, function(x) all(is.na(x)))
+sum(ddd)
+
+```
+
+#### Correct los
+
+```{r}
+loc_data <- read.csv("Analysis/location_data.csv")
+all_pi.data <- read.csv("Analysis/all_piData.csv")
+all_pi.data['rm_locs'] <- loc_data$rm_locs
+summary(all_pi.data$los)
+
+all_pi.data$los <- as.numeric(as.Date(pi.data$dischargedt) - as.Date(pi.data$admitdt))
+write.csv(all_pi.data, "Analysis/all_piData.csv")
+
+remove_locs = c("UH 4A", "UH 4AS STROKE", "UH 6D CRIT CARE ICU", "UH 7C MED ACUTE CARE",
+                "UH 7DN CORONARY CARE", "UH 8A3 Onc Acute Care", "UH BAC BURN ACUTE", "UH SHORT STAY UNIT")
+
+locs_to_remove <- loc_data$location_1 %in% remove_locs
+sum(locs_to_remove)
+
+table(all_pi.data$pi[!locs_to_remove])
+all_pi.data["locs_to_remove"] <- locs_to_remove
+
+write.csv(all_pi.data, "Analysis/all_piData.csv")
+
+```
+
+
+#### Convert location data to long format
+
+```{r}
+id <- as.character(pi.data$encounterid)
+loc_data_long <- cbind(id, as.matrix(loc_data[,1:3]))
+dim(loc_data_long)
+
+for (i in seq(4,45,3)) {
+  mat <- cbind(id,as.matrix(loc_data[,i:(i+2)]))
+  
+  loc_data_long <- rbind(loc_data_long, mat)
+  print(dim(loc_data_long))
+  
+}
+loc_data_long <- data.frame(loc_data_long)
+loc_data_long$id <- as.character(loc_data_long$id)
+```
+
+
+```{r}
+
+library(reshape2)
+loc_data_long$location_1startdate <-  as.Date(loc_data_long$location_1startdate)
+
+loc_data_long$location_1enddate <-  as.Date(loc_data_long$location_1enddate)
+loc_data_long <- loc_data_long[,1:4]
+
+#loc_data_wide <- dcast(loc_data_long, 
+#                      id ~ location_1, 
+#                       fun.aggregate = function(x) as.Date(x[1]), 
+#                       value.var ="location_1startdate")
+
+loc_data_wide2<- reshape(data=loc_data_long, timevar="location_1",
+                         idvar = "id",
+                         v.name=c("location_1startdate","location_1enddate"),
+                         direction="wide")
+
+
+location_los <- dplyr::select(loc_data_wide2, contains('enddate')) - dplyr::select(loc_data_wide2, contains('startdate'))
+
+location_los <- as.data.frame(apply(location_los,2, function(x) as.numeric(sub(" days","", x))))
+
+location_los[is.na(location_los)] = 0
+
+
+# save both dataframe to file
+names(location_los) <- sub("location_1enddate.", "", names(location_los))
+location_los['id'] <- id
+write.csv(location_los, "Analysis/location_los.csv", row.names = FALSE)
+
+names(loc_data_wide2) <- sub("location_1", "", names(loc_data_wide2))
+write.csv(loc_data_wide2, "Analysis/loc_dates_wide.csv", row.names = FALSE)
+```
+
+```{r}
+locs.rm <- sub("startdate.", "", names(loc_data_wide2))
+locs.rm <- sub("enddate.", "", names(loc_data_wide2))
+save_names <- names(loc_data_wide2)
+locs.rm <- (locs.rm[2:61] %in% c("MH 10E PED ICU","MH 8E ACUTE CARE","UH 9C ADULT PSYCH"))
+names(loc_data_wide2) <- locs.rm
+
+new_loc_data <- select(loc_data_wide2, -matches( "MH 10E PED ICU|MH 8E ACUTE CAR|UH 9C ADULT PSYCH"))
+sum(apply(new_loc_data,1, function(x)  sum(!is.na(x))) < 1)
+```
+
+
+
+
+## Agreggate periop data
+
+
+### Get yes/no (binary) periop data
+
+```{r}
+periop_vars <- grep("periop", names(pi.data), value = T)
+#periop_data <- gsub("periop\\d+\\_","", periop_data)
+periop_vars <- gsub("\\d+\\_","_", periop_vars)
+periop_vars <- unique(gsub("\\d+$","", periop_vars))
+print(periop_vars)
+```
+
+```{r}
+or_yn_vars <- c("periop_steroid_", "periop_vasopressor_")
+or_yn_vars <- append(or_yn_vars, grep("yn$", periop_vars, value = TRUE))
+
+# Empty data frame to hold the results
+or_yn_perc <- as.data.frame(matrix(data=NA, nrow = nrow(ts_data), ncol = length(or_yn_vars)))
+colnames(or_yn_perc) <- paste(or_yn_vars, "perc", sep = "_")
+
+# Table for yes or no
+or_yn_use <- or_yn_perc
+colnames(or_yn_use) <- paste(or_yn_vars, "used", sep = "_")
+
+# Compute percent: # days with treatment/# los in hospital
+treatment_percent <- function (x) (apply(x, 1, sum, na.rm=T)*100/pi.data$los)
+
+# Get the entire OR data
+or_data <- select(pi.data, starts_with("periop"))
+
+for (i in 1:length(or_yn_vars)) {
+  # Select a specific treatment type one by one
+  or.dt <- dplyr::select(or_data, contains(gsub("periop", "", or_yn_vars[i])))
+  
+  # Calculate percent of los with each type of treatment
+  or_yn_perc[,i] <- treatment_percent(or.dt)
+  
+  # Check if there is use of a specific treatment type.
+  or_yn_use[,i] <- apply(!is.na(or.dt), 1, any)
+}
+
+summary(or_yn_perc)
+
+summary(or_yn_use)
+```
+
+#### Analyze periop data missing values
+
+```{r}
+periop_yn_agg <- cbind(or_yn_use, or_yn_perc)
+write.csv(periop_yn_agg, "Analysis/periop_yn_agg.csv")
+# get show the missing information matrix           
+mdf <- missing_data.frame(periop_agg) 
+#show(mdf)
+image(mdf)
+```
+
+### Get numeric periop data
+
+```{r periop.numeric}
+# get the numeric variables
+periop_num_vars <- setdiff(periop_vars, or_yn_vars)
+
+# get variables for minimum values
+periop_min_vars <- grep("min", periop_num_vars, value = T)
+
+# table to hold absolute min value for each variable
+periop_min <- data.frame(matrix(NA, nrow = nrow(ts_data), ncol = length(periop_min_vars)))
+colnames(periop_min) <- periop_min_vars
+
+# Get variables with max values
+periop_max_vars <- grep("max", periop_num_vars, value = T)
+
+# table to hold absolute min value for each variable
+periop_max <- data.frame(matrix(NA, nrow = nrow(ts_data), ncol = length(periop_max_vars)))
+colnames(periop_max) <- periop_max_vars
+
+# Compute absolute minimum for the numeric variables
+get.min <- function(x) ifelse(all(is.na(x)), NA, min(x, na.rm = T))
+
+for (i in periop_min_vars) {
+  min_tbl <- select(or_data, ends_with(gsub("periop", "",i)))
+  #print(c(i,dim(min_tbl)))
+  periop_min[[i]] <- apply(min_tbl, 1, get.min)
+}
+
+# Compute absolute maximum for the numeric variables
+get.max <- function(x) ifelse(all(is.na(x)), NA, max(x, na.rm = T))
+
+for (i in periop_max_vars) {
+  max_tbl <- select(or_data, ends_with(gsub("periop", "",i)))
+  #print(c(i,gsub("periop_", "",i),names(max_tbl)[1:2]))
+  periop_max[[i]] <- apply(max_tbl, 1, get.max)
+}
+
+
+##############################################################
+# Empty tables to hold the results for mean values
+periop_num_mean <- data.frame(matrix(data=NA, nrow = nrow(ts_data), ncol = length(periop_num_vars)))
+colnames(periop_num_mean) <- periop_num_vars
+
+# Compute the mean of min and max for all hospital stay period
+avg_value <- function (x) (apply(x, 1, mean, na.rm=T))
+
+for (i in periop_num_vars) {
+  # Select one type of treatment/feature at a time
+  select_dt <- select(or_data, ends_with(gsub("periop","",i)))
+
+  # Compute the mean across length of stay for each individual
+  periop_num_mean[[i]] <- avg_value(select_dt)
+}
+colnames(periop_num_mean) <- paste0(periop_num_vars, "_avg")
+
+###################################################
+# Combine all numeric aggregate tables to one table
+periop_num_agg <- cbind(periop_min, periop_max, periop_num_mean)
+
+write.csv(periop_num_agg, "Analysis/periop_numeric_agg.csv")
+```
+
+
+## All data in the file
+
+- Static
+- dail binary
+- Daily numeric
+- daily braden
+- Periop
+- location
+- Anesthesia duration
+- operation date
+- patient in room duration
+- surgical schedule
+- surgical service
+- sugProcDuration
+
+### Anesthesia duration data
+
+```{r fig.width=10}
+anesthesia_data <- dplyr::select(pi.data, starts_with("Anesthesia"))
+
+counts <- function(df) apply(df, 1,  function (x) sum(!is.na(x)))
+
+anesth_duration <- counts(anesthesia_data)
+histogram(anesth_duration)
+# Plot how many observations each column have
+count.plot <- function (dt, ttl)
+  {obs.counts <- apply(!is.na(dt), 2, function (x) sum(x, na.rm = T)*100/length(x))
+    xbar <- barplot(obs.counts, 
+                ylim = c(0,100),
+                 names.arg = NA,
+                 main = ttl,
+                 xlab = "Minutes")
+text(xbar, 0, labels = 1:26, pos = 1, xpd = T)
+text(xbar, obs.counts, labels = round(obs.counts,2), pos = 3, xpd = T)
+
+box( )
+}
+
+ttl = "Percent of individual with Anesthesia"
+
+count.plot(anesthesia_data, ttl)
+```
+#### Number of individual with no anesthesia use or missing data
+
+```{r}
+sum(apply(is.na(anesthesia_data), 1, all))
+```
+
+### Surgical Procedure Duration data
+
+*Question: What do the numbers represent in this data?*
+
+```{r fig.width=10}
+proc.dur_data <- dplyr::select(pi.data, starts_with("SurgProc"))
+procedure_time <- counts(proc.dur_data)
+histogram(procedure_time)
+ttl = "Surgery duration vs percent of individual"
+
+count.plot(proc.dur_data, ttl)
+```
+
+### Patient in room Duration data
+
+*Question: What do the numbers represent in this data?*
+
+```{r fig.width=10}
+room.dur_data <- dplyr::select(pi.data, starts_with("PatientInRoom"))
+
+inroom_time <- counts(room.dur_data)
+# Plot how many observations each column have
+ttl = "In room duration vs percent of individual"
+
+count.plot(room.dur_data, ttl)
+```
+
+### Surgical Schedule Procedure data
+
+*Question: What does this data represent?*
+
+```{r fig.width=10}
+surg.sch_data <- dplyr::select(pi.data, starts_with("SurgicalSchedule"))
+surgical_schedule <- apply(surg.sch_data, 1, paste, collapse='*')
+```
+
+#### Number of individual with no Surgical Schedule Procedure data
+
+```{r}
+sum(apply(is.na(surg.sch_data), 1, all))
+```
+
+### Surgical Service data
+
+*Question: What does this data represent?*
+
+```{r fig.width=10}
+surg.serv_data <- dplyr::select(pi.data, starts_with("surgicalservice_"))
+surgical_serivice <- apply(surg.serv_data, 1, paste, collapse='*')
+```
+
+#### Number of individual with no Surgical Service data
+
+```{r}
+sum(apply(is.na(surg.serv_data), 1, all))
+```
+
+### Operation date data
+
+*Question: What does this data represent?*
+
+```{r fig.width=10}
+library(dplyr)
+op.date_data <- dplyr::select(pi.data, dplyr::starts_with("operation"))
+
+counts <- function(df) apply(df, 1,  function (x) sum(!is.na(x)))
+
+op_los <- apply(op.date_data, 1,  function (x) sum(!is.na(x)))
+summary(op_los)
+## Remove patients with no surgical procedure
+no.surgury <- apply(apply(op.date_data, 1, is.na), 2,all)
+length(no.surgury)
+pi <- static_data$pi[!no.surgury]
+# Calculate percent pi and non pi
+pi.rate <- round(prop.table(table(static_data$pi))*100,2)
+pi.rate
+table(pi)
+
+
+## Remove patients with lost less than 2 days
+los = as.Date(pi.data$dischargedt)-as.Date(pi.data$admitdt)
+los_2 <-(los >=2)
+pi <- pi[los_2]
+table(pi)
+round(prop.table(table(pi))*100,2)
+length(pi)
+
+fltr <- apply(matrix(c(!no.surgury,los_2), ncol=2 ),1 ,  all)
+table(fltr)
+table(static_data$pi[fltr])
+
+table(pi)
+op.data <- data.frame(matrix(c(op_los, fltr), ncol=2))
+colnames(op.data) <- c("Operation days","Filter")
+```
+
+#### Number of individual with no operation date data
+
+```{r}
+sum(apply(is.na(op.date_data), 1, all))
+```
+### Merge all operation related data
+
+```{r}
+op_agg_data <- cbind(anesthesia_data, proc.dur_data, room.dur_data, surg.sch_data, surg.serv_data)
+
+write.csv(op_agg_data, "Analysis/surgical_data_agg.csv")
+surg_data_agg <- read.csv("Analysis/surgical_data_agg.csv")
+
+surgical_data <- data.frame(cbind(op_los, fltr,anesth_duration,
+                       procedure_time,inroom_time,surgical_serivice, surgical_schedule))
+
+surgical_data$encounterid <- pi.data$encounterid
+
+
+write.csv(surgical_data, "Analysis/surgical_data_processed.csv")
+
+table(static_data$pi[as.logical(surgical_data$fltr)])
+table(static_data$pi[fltr])
+cor(surgical_data[,3:5])
+corrplot::corrplot(cor(surgical_data[,3:5]), addCoef.col = "white")
+
+```
+
+```{r}
+library("openxlsx")
+asa_data <- read.xlsx("Analysis/IP_op_ASA_data.xlsx")
+
+asa_na <- apply(!apply(asa_data[,3:28], 1, is.na), 2, sum)
+
+asa_data$asa_mean <- apply(asa_data[,3:28], 1, mean, na.rm=TRUE)
+asa_data$asa_min <- apply(asa_data[,3:28], 1, min, na.rm=TRUE)
+asa_data$asa_min[asa_data$asa_min == Inf] <- -1
+asa_data$asa_max <- apply(asa_data[,3:28],1, max, na.rm=TRUE)
+asa_data$asa_max[asa_data$asa_max == -Inf] <- -1
+asa_data$asa_sd<- apply(asa_data[,3:28],1, sd, na.rm=TRUE)
+
+asa_data_agg <- merge(pi.data[,1:2], asa_data[,c(1,2,29:32)], by=c("encounterid")) #,"encounterid"))
+#asa_data_agg <- asa_data_agg %>% dplyr::select(1,2,29,30,31,32)
+# SD has too many NA values, so we will drop it.
+asa_data_agg <- asa_data_agg[,-7]
+write.csv(asa_data_agg, "Analysis/asa_data_agg.csv")
+
+summary(asa_data_agg[,4:6])
+```
+
+
