@@ -43,7 +43,7 @@ The complete code and end-to-end pipeline workflow for this project is available
 Application
 ===========
 
-The [pressure injury prediction model (PIPM) live application is available for interactive testing](https://socr.shinyapps.io/RShinyApp_PIPM/) by researchers, clinicians, and healthcare providers.
+The pressure injury prediction model (PIPM) live application (*app*) is available on [shinyapps.io](https://socr.shinyapps.io/RShinyApp_PIPM/) and [Michigan Medicine server](http://myumi.ch/O49zG) for interactive testing by researchers, clinicians, developers, and healthcare providers.
 
 Acknowledgments
 ===============
