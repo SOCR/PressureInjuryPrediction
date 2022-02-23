@@ -13,6 +13,7 @@ Table of contents
    * [Code](#code)
    * [App](#application)
    * [Acknowledgments](#acknowledgments)
+   * [References](#references)
 <!--tc-->
 This SOCR project is focused on a clinical collaboration to study *pressure injury* in bed-confined hospitalized patients.
 
@@ -49,4 +50,9 @@ Acknowledgments
 ===============
 
 The PIPM project supported in part by the University of Michigan School of Nursing; NSF grants 1916425, 1734853, 1636840, 1416953, 0716055 and 1023115; and NIH grants P20 NR015331, U54 EB020406, P50 NS091856, P30 DK089503, UL1TR002240, R01CA233487, R01MH121079.
+
+References
+==========
+
+Anderson, C, Bekele, Z, Qiu, Y, Tschannen, D, and Dinov, ID. (2021) [Modeling and prediction of pressure injury in hospitalized patients using artificial Intelligence](https://doi.org/10.1186/s12911-021-01608-5), BMC Med. Inform. Decis. Mak., 21:253, [DOI: 10.1186/s12911-021-01608-5](https://doi.org/10.1186/s12911-021-01608-5). 
 
